@@ -41,6 +41,9 @@ const App = () => {
   const mqttEmitter = new NativeEventEmitter(NativeModules.MqttManager);
   const isMounted = useRef(true);
   const countdownRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Ref para controlar el cooldown del botón
+  const buttonCooldownRef = useRef(false);
 
   useEffect(() => {
     connectToBroker();
@@ -193,8 +196,13 @@ const App = () => {
   };
 
   const handleSnowPress = async () => {
-    if (!isConnected || !deviceActive) return;
+    // Si el botón está en cooldown o no está conectado, ignorar
+    if (buttonCooldownRef.current || !isConnected || !deviceActive) return;
 
+    // Activar cooldown de 0.5 segundos
+    buttonCooldownRef.current = true;
+    
+    // Cambiar el estado visual inmediatamente
     const newState = !isSnowActive;
     setIsSnowActive(newState);
     
@@ -204,6 +212,11 @@ const App = () => {
       Alert.alert('Error', `No se pudo enviar comando: ${(err as Error).message}`);
       setIsSnowActive(!newState);
     }
+    
+    // Desactivar cooldown después de 0.5 segundos
+    setTimeout(() => {
+      buttonCooldownRef.current = false;
+    }, 1500);
   };
 
   const getTemperatureColor = () => {
