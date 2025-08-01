@@ -197,6 +197,8 @@ const App = () => {
           
           if (characteristic?.value) {
             const rawValue = Buffer.from(characteristic.value, 'base64').toString('utf-8');
+
+              console.log('Respuesta recibida del dispositivo:', rawValue);
             
             if (rawValue.startsWith('IP:')) {
               const ip = rawValue.split(':')[1];

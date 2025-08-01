@@ -1,6 +1,7 @@
 #que hace el codigo: publicar que esta encendido, conectarse al celular, recibir las credenciales wifi, conectarse a internet, enviar la ip.
 #que falta: enviar solo los datos necesarios para mqtt correctamente: CLIENT_ID, USER Y PASSWORD.
 #detalles faltantes: UUID dinamicos, que el esp32 guarde la contraseña wifi.
+#que el esp32 se pueda actualizar
 import asyncio
 import aioble
 import bluetooth
@@ -9,11 +10,11 @@ import network
 import time
 
 # Configuración de hardware
-LED_PIN = 12
-LED_GREEN_PIN = 14
+LED_AZUL = 12
+LED_VERDE = 14
 
-led_pwm = PWM(Pin(LED_PIN), freq=5000, duty=150)
-led_green = Pin(LED_GREEN_PIN, Pin.OUT)
+led_ble = Pin(LED_AZUL, Pin.OUT)
+led_wifi = Pin(LED_VERDE, Pin.OUT)
 
 # UUIDs BLE
 _SERVICE_UUID = bluetooth.UUID("19b10000-e8f2-537e-4f6c-d104768a1214")
@@ -59,7 +60,7 @@ async def send_status(connection, message):
 async def handle_ble_communication(connection):
     try:
         print("Conexión establecida desde:", connection.device)
-        led_pwm.duty(150)
+        led_ble.value(1)
         
         await connection.exchange_mtu(512)
         
@@ -92,27 +93,27 @@ async def handle_ble_communication(connection):
             if connected:
                 ip = wlan.ifconfig()[0]
                 print("Conectado a WiFi. IP:", ip)
-                led_green.value(1)
+                led_ble.value(0)
+                led_wifi.value(1)
                 await send_status(connection, f"IP:{ip}") #ip del esp32
-                await send_status(connection, f"PORT:1883") #puerto
                 await send_status(connection, f"USER:Mariano_Sanchez") #MQTT user
                 await send_status(connection, f"PASSWORD:0001") #MQTT password
                 await send_status(connection, f"CLIENT_ID:TK-2025-MA00-0001") #client id
                 await asyncio.sleep_ms(2000)
                 break
             else:
-                led_green.value(0)
+                led_wifi.value(0)
                 await send_status(connection, "Error:Datos de red incorrectos")
                 print("Error de conexión - Esperando nuevos datos...")
                 
     except Exception as e:
         print("Error en comunicación BLE:", e)
-        led_green.value(0)
+        led_ble.value(0)
     finally:
-        led_pwm.duty(0)
+        led_wifi.value(0)
         wlan = network.WLAN(network.STA_IF)
         if not wlan.isconnected():
-            led_green.value(0)
+            led_wifi.value(0)
         try:
             await connection.disconnect()
         except:
@@ -123,7 +124,7 @@ async def ble_server():
         try:
             print("Anunciando BLE...")
             wlan = network.WLAN(network.STA_IF)
-            led_green.value(1 if wlan.isconnected() else 0)
+            led_ble.value(0 if wlan.isconnected() else 0)
             
             async with await aioble.advertise(
                 250_000,
@@ -136,13 +137,13 @@ async def ble_server():
                 
         except Exception as e:
             print("Error en servidor BLE:", e)
-            led_green.value(0)
+            led_ble.value(0)
             await asyncio.sleep_ms(1000)
 
 async def main():
-    led_pwm.duty(0)
+    led_ble.value(0)
     wlan = network.WLAN(network.STA_IF)
-    led_green.value(1 if wlan.isconnected() else 0)
+    led_wifi.value(1 if wlan.isconnected() else 0)
     await ble_server()
 
 asyncio.run(main()) 
