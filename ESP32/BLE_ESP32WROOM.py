@@ -9,11 +9,11 @@ import network
 import time
 
 # Configuración de hardware
-LED_PIN = 12
-LED_GREEN_PIN = 14
+led_azul = 12
+led_verde = 14
 
-led_pwm = PWM(Pin(LED_PIN), freq=5000, duty=150)
-led_green = Pin(LED_GREEN_PIN, Pin.OUT)
+LEDBLE = Pin(led_azul, Pin.OUT)
+LEDWIFI = Pin(led_verde, Pin.OUT)
 
 # UUIDs BLE
 _SERVICE_UUID = bluetooth.UUID("19b10000-e8f2-537e-4f6c-d104768a1214")
@@ -59,7 +59,7 @@ async def send_status(connection, message):
 async def handle_ble_communication(connection):
     try:
         print("Conexión establecida desde:", connection.device)
-        led_pwm.duty(150)
+        LEDBLE.value(1)
         
         await connection.exchange_mtu(512)
         
@@ -92,7 +92,7 @@ async def handle_ble_communication(connection):
             if connected:
                 ip = wlan.ifconfig()[0]
                 print("Conectado a WiFi. IP:", ip)
-                led_green.value(1)
+                LEDWIFI(1)
                 await send_status(connection, f"IP:{ip}") #ip del esp32
                 await send_status(connection, f"PORT:1883") #puerto
                 await send_status(connection, f"USER:Mariano_Sanchez") #MQTT user
@@ -101,7 +101,7 @@ async def handle_ble_communication(connection):
                 await asyncio.sleep_ms(2000)
                 break
             else:
-                led_green.value(0)
+                LEDWIFI(0)
                 await send_status(connection, "Error:Datos de red incorrectos")
                 print("Error de conexión - Esperando nuevos datos...")
                 
@@ -123,7 +123,7 @@ async def ble_server():
         try:
             print("Anunciando BLE...")
             wlan = network.WLAN(network.STA_IF)
-            led_green.value(1 if wlan.isconnected() else 0)
+            LEDWIFI.value(1 if wlan.isconnected() else 0)
             
             async with await aioble.advertise(
                 250_000,
@@ -136,13 +136,13 @@ async def ble_server():
                 
         except Exception as e:
             print("Error en servidor BLE:", e)
-            led_green.value(0)
+            LEDWIFI.value(0)
             await asyncio.sleep_ms(1000)
 
 async def main():
-    led_pwm.duty(0)
+    LEDBLE.value(0)
     wlan = network.WLAN(network.STA_IF)
-    led_green.value(1 if wlan.isconnected() else 0)
+    LEDWIFI.value(1 if wlan.isconnected() else 0)
     await ble_server()
 
 asyncio.run(main()) 
