@@ -34,7 +34,7 @@ class MqttManager(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
 
             Log.d(TAG, "Conectando a: $url con clientId: $clientId")
 
-            mqttClient = MqttAsyncClient(url, clientId, MemoryPersistence()).apply {
+            mqttClient = MqttAsyncClient(url, clientId, MemoryPersistence()).apply {    
                 setCallback(object : MqttCallback {
                     override fun connectionLost(cause: Throwable?) {
                         Log.e(TAG, "Conexión perdida: ${cause?.message}")
@@ -227,4 +227,17 @@ class MqttManager(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
             }
         }
     }
+
+    @ReactMethod
+    fun addListener(eventName: String) {
+        // Necesario para el sistema de eventos de React Native
+        Log.d(TAG, "Listener añadido para: $eventName")
+    }
+
+    @ReactMethod
+    fun removeListeners(count: Int) {
+        // Lógica de limpieza si es necesaria
+        Log.d(TAG, "Removiendo $count listeners")
+    }
+
 }

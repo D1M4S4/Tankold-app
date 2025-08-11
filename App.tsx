@@ -13,12 +13,25 @@ import {
   Platform,
   PermissionsAndroid,
   Alert,
-  Image
+  Image,
+  NativeModules,
+  NativeEventEmitter
 } from 'react-native';
 import LottieView from 'lottie-react-native';
 import { BleManager, Device } from 'react-native-ble-plx';
 import { Buffer } from 'buffer';
 import { normalize, normalizeVertical, SCREEN } from './src/utils/normalize';
+
+// Definición de interfaz para MQTT Manager
+interface MqttManagerInterface {
+  connect: (url: string, clientId: string, username: string, password: string) => Promise<boolean>;
+  disconnect: () => Promise<void>;
+  isConnected: () => Promise<boolean>;
+  subscribe: (topic: string, qos: number) => Promise<void>;
+  publish: (topic: string, message: string, qos: number) => Promise<void>;
+}
+
+const MqttManager = NativeModules.MqttManager as MqttManagerInterface;
 
 type ConnectedDevice = {
   id: string;
@@ -42,8 +55,6 @@ const App = () => {
   const [connectedDevice, setConnectedDevice] = useState<Device | null>(null);
   const [connectedDevices, setConnectedDevices] = useState<ConnectedDevice[]>([]);
   const [isConnected, setIsConnected] = useState(false);
-  const [isPressed, setIsPressed] = useState(false);
-  const [isButtonDisabled, setIsButtonDisabled] = useState(false);
 
   const SERVICE_UUID = '19b10000-e8f2-537e-4f6c-d104768a1214';
   const CHARACTERISTIC_UUID = '19b10001-e8f2-537e-4f6c-d104768a1214';
@@ -143,10 +154,6 @@ const App = () => {
       setIsLoading(false);
     }
   }, [manager, requestPermissions, checkBluetoothState, connectedDevices]);
-
-  const handlePress = useCallback(() => {
-    setIsPressed(prev => !prev);
-  }, []);
 
   const handleSearchPress = useCallback(() => {
     if (isLoading) {
@@ -292,6 +299,21 @@ const App = () => {
     }
   }, [connectedDevice, ssid, password]);
 
+  // Función para eliminar dispositivo conectado
+  const handleDeleteDevice = useCallback((deviceId: string) => {
+    Alert.alert('Eliminar', '¿Desea eliminar este dispositivo?', [
+      { text: 'Cancelar', style: 'cancel' },
+      { 
+        text: 'Eliminar', 
+        onPress: () => {
+          setConnectedDevices(prev => prev.filter(d => d.id !== deviceId));
+          // Aquí deberías agregar la lógica para desconectar el dispositivo BLE
+        },
+        style: 'destructive'
+      }
+    ]);
+  }, []);
+
   useEffect(() => {
     const timer = setTimeout(() => setShowAnimation(false), 3000);
     return () => clearTimeout(timer);
@@ -314,6 +336,14 @@ const App = () => {
     <View style={styles.container}>
       <StatusBar backgroundColor="#fff" barStyle="dark-content" />
 
+      {/* Indicador global de conexión */}
+      {isConnecting && (
+        <View style={styles.connectingOverlay}>
+          <ActivityIndicator size="large" color="#3498db" />
+          <Text style={styles.connectingText}>Conectando al sistema...</Text>
+        </View>
+      )}
+
       <TouchableOpacity 
         style={styles.addButton} 
         onPress={handleSearchPress}
@@ -326,25 +356,11 @@ const App = () => {
         <View style={styles.connectedDevicesContainer}>
           <Text style={styles.connectedDevicesTitle}>Dispositivos Conectados:</Text>
           {connectedDevices.map((device) => (
-            <View key={device.id} style={styles.deviceButton}>
-              <Image
-                source={require('./assets/tk5.png')}
-                style={styles.deviceImage}
-              />
-              <View style={styles.deviceInfo}>
-                <Text style={styles.deviceText}>{device.name}</Text>
-              </View>
-              <TouchableOpacity
-                style={[styles.snowButton, isPressed ? styles.snowButtonPressed : styles.snowButtonReleased]}
-                onPress={handlePress}
-                disabled={isButtonDisabled}
-              >
-                <Image
-                  source={require('./assets/copo2.png')}
-                  style={styles.snowButtonImage}
-                />
-              </TouchableOpacity>
-            </View>
+            <ConnectedDeviceItem
+              key={device.id}
+              device={device} 
+              onDelete={() => handleDeleteDevice(device.id)}
+            />
           ))}
         </View>
       )}
@@ -469,6 +485,333 @@ const App = () => {
   );
 };
 
+// Componente para dispositivos conectados
+const ConnectedDeviceItem = ({ device, onDelete }: { device: ConnectedDevice, onDelete: () => void }) => {
+  const brokerUrl = 'ssl://qbd56d0e.ala.us-east-1.emqxsl.com:8883';
+  
+  const [clientId] = useState(`client_${Math.random().toString(16).substr(2, 8)}`);
+  const username = device.user || '';
+  const password = device.password || '';
+  const controlTopic = 'Control';
+  const tempTopic = 'Temp';
+  const statusTopic = 'Estado';
+
+  const [isConnected, setIsConnected] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isSnowActive, setIsSnowActive] = useState(false);
+  const [temperature, setTemperature] = useState<number | null>(null);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [countdown, setCountdown] = useState(15);
+  const [deviceActive, setDeviceActive] = useState(false);
+
+  const mqttEmitter = new NativeEventEmitter(NativeModules.MqttManager);
+  const isMounted = useRef(true);
+  const countdownRef = useRef<NodeJS.Timeout | null>(null);
+  const buttonCooldownRef = useRef(false);
+
+  // Referencias para mantener las suscripciones
+  const connectionSubscriptionRef = useRef<any>(null);
+  const messageSubscriptionRef = useRef<any>(null);
+
+  useEffect(() => {
+    isMounted.current = true;
+    
+    // Crear las suscripciones primero
+    connectionSubscriptionRef.current = mqttEmitter.addListener(
+      'connectionStatus', 
+      (event: { connected: boolean; error?: string }) => {
+        if (!isMounted.current) return;
+
+        if (event.connected) {
+          handleSuccessfulConnection();
+        } else {
+          handleDisconnection(event.error || 'Se perdió la conexión');
+        }
+      }
+    );
+
+    messageSubscriptionRef.current = mqttEmitter.addListener(
+      'messageReceived', 
+      (message: { topic: string; message: string }) => {
+        try {
+          const topic = message.topic;
+          const msg = message.message;
+
+          if (topic === tempTopic) {
+            const tempValue = parseFloat(msg);
+            if (!isNaN(tempValue)) {
+              setTemperature(tempValue);
+              resetCountdown();
+            }
+          }
+
+          if (topic === statusTopic) {
+            setIsSnowActive(msg === '1');
+            resetCountdown();
+          }
+        } catch (e) {
+          console.error("Error procesando mensaje:", e);
+        }
+      }
+    );
+
+    // Luego conectar al broker
+    connectToBroker();
+    startCountdown();
+
+    return () => {
+      isMounted.current = false;
+      
+      // Limpiar suscripciones
+      if (connectionSubscriptionRef.current) {
+        connectionSubscriptionRef.current.remove();
+      }
+      if (messageSubscriptionRef.current) {
+        messageSubscriptionRef.current.remove();
+      }
+      
+      // Desconectar MQTT
+      MqttManager.disconnect();
+      
+      // Limpiar temporizadores
+      stopCountdown();
+    };
+  }, [device.id]); // Solo se ejecuta cuando cambia el ID del dispositivo
+
+  useEffect(() => {
+    if (countdown <= 0) {
+      setDeviceActive(false);
+      setTemperature(null);
+      setIsSnowActive(false);
+      stopCountdown();
+    }
+  }, [countdown]);
+
+  const startCountdown = () => {
+    stopCountdown();
+    
+    countdownRef.current = setInterval(() => {
+      setCountdown(prev => {
+        if (prev <= 0) {
+          stopCountdown();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  const stopCountdown = () => {
+    if (countdownRef.current) {
+      clearInterval(countdownRef.current);
+      countdownRef.current = null;
+    }
+  };
+
+  const resetCountdown = () => {
+    setCountdown(20);
+    setDeviceActive(true);
+    if (!countdownRef.current) {
+      startCountdown();
+    }
+  };
+
+  const connectToBroker = async () => {
+    if (!isMounted.current || isConnecting || isConnected) return;
+
+    try {
+      setIsConnecting(true);
+      setError(null);
+      setDeviceActive(false);
+
+      console.log(
+        `Conectando al servidor MQTT con las siguientes credenciales:\n` +
+        `URL: ${brokerUrl}\n` +
+        `Client ID: ${clientId}\n` +
+        `Usuario: ${username}\n` +
+        `Contraseña: ${password}`
+      );
+      
+      const success = await MqttManager.connect(brokerUrl, clientId, username, password);
+      
+      if (!success) {
+        throw new Error('Falló la conexión sin error específico');
+      }
+    } catch (err) {
+      console.error('Error en conexión MQTT:', err);
+      handleConnectionError(err as Error);
+    }
+  };
+
+  const handleSuccessfulConnection = () => {
+    if (!isMounted.current) return;
+    
+    setIsConnecting(false);
+    setIsConnected(true);
+    setError(null);
+    
+    // Suscribirse a los topics después de conectar
+    MqttManager.subscribe(tempTopic, 1)
+      .then(() => console.log(`Suscripción exitosa a ${tempTopic}`))
+      .catch((err: any) => console.error(`Error suscribiendo a ${tempTopic}:`, err));
+      
+    MqttManager.subscribe(controlTopic, 1)
+      .then(() => console.log(`Suscripción exitosa a ${controlTopic}`))
+      .catch((err: any) => console.error(`Error suscribiendo a ${controlTopic}:`, err));
+      
+    MqttManager.subscribe(statusTopic, 1)
+      .then(() => console.log(`Suscripción exitosa a ${statusTopic}`))
+      .catch((err: any) => console.error(`Error suscribiendo a ${statusTopic}:`, err));
+  };
+
+  const handleDisconnection = (errorMessage: string) => {
+    if (!isMounted.current) return;
+    
+    setIsConnected(false);
+    setIsConnecting(false);
+    setDeviceActive(false);
+    setError(errorMessage);
+    stopCountdown();
+  };
+
+  const handleConnectionError = (error: Error) => {
+    if (!isMounted.current) return;
+    
+    setIsConnecting(false);
+    setDeviceActive(false);
+    setError(error.message);
+    stopCountdown();
+    
+    // Reconexión automática después de 5 segundos
+    setTimeout(() => {
+      if (isMounted.current && !isConnected) {
+        connectToBroker();
+      }
+    }, 5000);
+  };
+
+  const handleSnowPress = async () => {
+    if (buttonCooldownRef.current || !isConnected || !deviceActive) return;
+
+    buttonCooldownRef.current = true;
+    
+    const newState = !isSnowActive;
+    setIsSnowActive(newState);
+    
+    try {
+      await MqttManager.publish(controlTopic, newState ? '1' : '0', 0);
+    } catch (err) {
+      Alert.alert('Error', `No se pudo enviar comando: ${(err as Error).message}`);
+      setIsSnowActive(!newState);
+    }
+    
+    setTimeout(() => {
+      buttonCooldownRef.current = false;
+    }, 1500);
+  };
+
+  const getTemperatureColor = () => {
+    if (temperature === null) return '#95a5a6';
+    return temperature > 0 ? '#e74c3c' : '#3498db';
+  };
+
+  const handleWifiPress = () => {
+    Alert.alert('WiFi', 'Configuración de conexión WiFi');
+  };
+
+  const handleClockPress = () => {
+    Alert.alert('Programación', 'Configurar horarios de funcionamiento');
+  };
+
+  return (
+    <View style={styles.deviceContainer}>
+      <View style={styles.connectedDeviceButton}>
+        <Image
+          source={require('./assets/tk5.png')}
+          style={styles.deviceImage}
+        />
+        <View style={styles.deviceInfo}>
+          <Text style={styles.deviceText}>{device.name}</Text>
+        </View>
+        <TouchableOpacity
+          style={[
+            styles.snowButton,
+            (deviceActive && isSnowActive) 
+              ? styles.snowButtonActive 
+              : styles.snowButtonInactive,
+            (!isConnected || !deviceActive) && styles.buttonDisabled
+          ]}
+          onPress={handleSnowPress}
+          disabled={!isConnected || !deviceActive}
+        >
+          <Image
+            source={require('./assets/copo2.png')}
+            style={styles.snowButtonImage}
+          />
+        </TouchableOpacity>
+      </View>
+
+      <TouchableOpacity 
+        style={styles.menuButton}
+        onPress={() => setIsMenuOpen(!isMenuOpen)}
+      >
+        <Text style={styles.menuButtonText}>...</Text>
+      </TouchableOpacity>
+
+      {isMenuOpen && (
+        <View style={styles.dropdownMenu}>
+          <View style={styles.statusBarContainer}>
+            <Text style={[
+              styles.temperatureValue, 
+              { color: getTemperatureColor() }
+            ]}>
+              {temperature !== null ? `${temperature}°C` : '--°C'}
+            </Text>
+            
+            <View style={[
+              styles.statusIndicator,
+              { 
+                backgroundColor: deviceActive ? '#2ecc71' : '#e74c3c' 
+              }
+            ]} />
+            
+            <TouchableOpacity 
+              style={styles.iconButton} 
+              onPress={onDelete}
+            >
+              <Image
+                source={require('./assets/trash.png')}
+                style={styles.iconImage}
+              />
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.iconButton} 
+              onPress={handleWifiPress}
+            >
+              <Image
+                source={require('./assets/wifi.png')}
+                style={styles.iconImage}
+              />
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.iconButton} 
+              onPress={handleClockPress}
+            >
+              <Image
+                source={require('./assets/clock.png')}
+                style={styles.iconImage}
+              />
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+    </View>
+  );
+};
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -521,11 +864,14 @@ const styles = StyleSheet.create({
     marginBottom: normalizeVertical(10),
     color: '#333',
   },
-  deviceButton: {
+  deviceContainer: {
+    position: 'relative',
+    marginBottom: normalizeVertical(20),
+  },
+  connectedDeviceButton: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: normalize(15),
-    marginVertical: normalizeVertical(8),
     backgroundColor: '#fff',
     borderRadius: normalize(10),
     borderWidth: 1,
@@ -542,6 +888,7 @@ const styles = StyleSheet.create({
     fontSize: normalize(16),
     color: '#333',
     fontWeight: '600',
+    flex: 1,
   },
   snowButton: {
     padding: normalize(8),
@@ -551,18 +898,76 @@ const styles = StyleSheet.create({
     width: normalize(50),
     height: normalize(50),
   },
-  snowButtonPressed: {
-    backgroundColor: '#007AFF',
+  snowButtonActive: {
+    backgroundColor: '#3498db',
   },
-  snowButtonReleased: {
-    backgroundColor: '#e0e0e0',
+  snowButtonInactive: {
+    backgroundColor: '#bdc3c7',
   },
   snowButtonImage: {
     width: normalize(24),
     height: normalize(24),
+    tintColor: '#ffffff',
     resizeMode: 'contain',
   },
-  // Resto de estilos existentes se mantienen igual...
+  buttonDisabled: {
+    opacity: 0.6,
+  },
+  menuButton: {
+    position: 'absolute',
+    right: normalize(15),
+    bottom: normalize(-15),
+    backgroundColor: '#ecf0f1',
+    width: normalize(34),
+    height: normalize(34),
+    borderRadius: normalize(8),
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 2,
+  },
+  menuButtonText: {
+    fontSize: normalize(20),
+    fontWeight: 'bold',
+    color: '#7f8c8d',
+  },
+  dropdownMenu: {
+    backgroundColor: '#ecf0f1',
+    borderRadius: normalize(10),
+    padding: normalize(15),
+    marginTop: normalizeVertical(-10),
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    borderTopWidth: 1,
+    borderColor: '#d5d9dc',
+  },
+  statusBarContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    paddingVertical: normalizeVertical(8),
+  },
+  temperatureValue: {
+    fontSize: normalize(16),
+    fontWeight: '700',
+    minWidth: normalize(70),
+  },
+  statusIndicator: {
+    width: normalize(12),
+    height: normalize(12),
+    borderRadius: normalize(6),
+  },
+  iconButton: {
+    padding: normalize(8),
+    borderRadius: normalize(20),
+  },
+  iconImage: {
+    width: normalize(27),
+    height: normalize(27),
+  },
   centeredTextContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -601,6 +1006,17 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: normalize(20),
     paddingBottom: normalizeVertical(40),
+  },
+  deviceButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: normalize(15),
+    marginVertical: normalizeVertical(8),
+    backgroundColor: '#fff',
+    borderRadius: normalize(10),
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    elevation: 2,
   },
   deviceInfo: {
     flex: 1,
@@ -659,6 +1075,34 @@ const styles = StyleSheet.create({
     fontSize: normalize(16),
     color: '#fff',
   },
+
+    connectingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 100,
+  },
+  connectingText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: '#3498db',
+    fontWeight: 'bold',
+  },
+  deviceConnectingIndicator: {
+    position: 'absolute',
+    top: 5,
+    right: 5,
+    zIndex: 10,
+  },
+  
+  
 });
+
+
 
 export default App;

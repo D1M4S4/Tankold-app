@@ -7,7 +7,7 @@ import bluetooth
 from machine import Pin, PWM
 import network
 import time
-from neopixel import NeoPixel
+from Tankold.ESP32.ESP32C6.neo_pixel import NeoPixel
 
 # Configuración de hardware
 #ESP32 WROOM:
