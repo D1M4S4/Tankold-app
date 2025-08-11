@@ -1,3 +1,3 @@
 # TANKOLD APP
 Mi primera app(esta dlv)
-## Juntando las 2 partes BLE y MQTT
+## Agregando el codigo MQTT funcional
