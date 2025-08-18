@@ -191,72 +191,78 @@ const App = () => {
       setModalVisible(true);
       setDevices(prev => prev.filter(d => d.id !== device.id));
 
-      connected.monitorCharacteristicForService(
-        RECEIVE_SERVICE_UUID,
-        RECEIVE_CHARACTERISTIC_UUID,
-        (error, characteristic) => {
-          if (error) {
-            console.error('Error en monitorización:', error);
-            setIsConnected(false);
-            setIsConnecting(false);
-            return;
-          }
-          
-          if (characteristic?.value) {
-            const rawValue = Buffer.from(characteristic.value, 'base64').toString('utf-8');
+  connected.monitorCharacteristicForService(
+    RECEIVE_SERVICE_UUID,
+    RECEIVE_CHARACTERISTIC_UUID,
+    (error, characteristic) => {
+      if (error) {
+        console.error('Error en monitorización:', error);
+        setIsConnected(false);
+        setIsConnecting(false);
+        return;
+      }
+      
+      if (characteristic?.value) {
+        const rawValue = Buffer.from(characteristic.value, 'base64').toString('utf-8');
+        
+        if (rawValue.startsWith('IP:')) {
+          const ip = rawValue.split(':')[1];
+          setConnectedDevices(prev => {
+            if (prev.some(d => d.id === device.id)) return prev;
             
-            if (rawValue.startsWith('IP:')) {
-              const ip = rawValue.split(':')[1];
-              setConnectedDevices(prev => {
-                if (prev.some(d => d.id === device.id)) return prev;
-                
-                return [...prev, {
-                  id: device.id,
-                  name: device.name || 'Dispositivo',
-                  ip,
-                  port: '',
-                  user: '',
-                  password: '',
-                  clientId: ''
-                }];
-              });
-              setModalVisible(false);
-              setIsConnected(true);
-              setIsConnecting(false);
-            }
-            else if (rawValue.startsWith('PORT:')) {
-              const port = rawValue.split(':')[1];
-              setConnectedDevices(prev =>
-                prev.map(d => d.id === device.id ? {...d, port} : d)
-              );
-            }
-            else if (rawValue.startsWith('USER:')) {
-              const user = rawValue.split(':')[1];
-              setConnectedDevices(prev => 
-                prev.map(d => d.id === device.id ? {...d, user} : d)
-              );
-            }
-            else if (rawValue.startsWith('PASSWORD:')) {
-              const password = rawValue.split(':')[1];
-              setConnectedDevices(prev => 
-                prev.map(d => d.id === device.id ? {...d, password} : d)
-              );
-            }
-            else if (rawValue.startsWith('CLIENT_ID:')) {
-              const clientId = rawValue.split(':')[1];
-              setConnectedDevices(prev => 
-                prev.map(d => d.id === device.id ? {...d, clientId} : d)
-              );
-            }
-            else if (rawValue.startsWith('Error:')) {
-              const errorMessage = rawValue.split(':')[1];
-              Alert.alert('Error', errorMessage);
-              setIsConnected(false);
-              setIsConnecting(false);
-            }
-          }
+            return [...prev, {
+              id: device.id,
+              name: device.name || 'Dispositivo',
+              ip,
+              port: '',
+              user: '',
+              password: '',
+              clientId: ''
+            }];
+          });
+          setModalVisible(false);
+          setIsConnected(true);
+          setIsConnecting(false);
         }
-      );
+        else if (rawValue.startsWith('PORT:')) {
+          const port = rawValue.split(':')[1];
+          console.log('MQTT PORT recibido:', port); // ✅ Consola: Puerto MQTT
+          setConnectedDevices(prev =>
+            prev.map(d => d.id === device.id ? {...d, port} : d)
+          );
+        }
+        else if (rawValue.startsWith('USER:')) {
+          const user = rawValue.split(':')[1];
+          console.log('MQTT USER recibido:', user); // ✅ Consola: Usuario MQTT
+          setConnectedDevices(prev => 
+            prev.map(d => d.id === device.id ? {...d, user} : d)
+          );
+        }
+        else if (rawValue.startsWith('PASSWORD:')) {
+          const password = rawValue.split(':')[1];
+          console.log('MQTT PASSWORD recibido:', password); // ✅ Consola: Contraseña MQTT
+          setConnectedDevices(prev => 
+            prev.map(d => d.id === device.id ? {...d, password} : d)
+          );
+        }
+        else if (rawValue.startsWith('CLIENT_ID:')) {
+          const clientId = rawValue.split(':')[1];
+          console.log('MQTT CLIENT_ID recibido:', clientId); // ✅ Consola: Client ID MQTT
+          setConnectedDevices(prev => 
+            prev.map(d => d.id === device.id ? {...d, clientId} : d)
+          );
+        }
+        else if (rawValue.startsWith('Error:')) {
+          const errorMessage = rawValue.split(':')[1];
+          console.error('Error del dispositivo:', errorMessage); // ✅ Consola: Errores
+          Alert.alert('Error', errorMessage);
+          setIsConnected(false);
+          setIsConnecting(false);
+        }
+      }
+    }
+  );
+  
     } catch (error) {
       console.error('Error de conexión BLE:', error);
       Alert.alert('Error', 'No se pudo conectar al dispositivo');
