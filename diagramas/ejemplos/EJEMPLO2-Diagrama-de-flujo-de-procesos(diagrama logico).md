@@ -1,5 +1,5 @@
 ```mermaid
-graph LR
+graph TB
     A[Inicio] --> B[Usuario busca producto]
     B --> C[Selecciona producto]
     C --> D[Añade al carrito]
