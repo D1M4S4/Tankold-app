@@ -1,6 +1,3 @@
-#que hace el codigo: publicar que esta encendido, conectarse al celular, recibir las credenciales wifi, conectarse a internet, enviar la ip.
-#que falta: enviar solo los datos necesarios para mqtt correctamente: CLIENT_ID, USER Y PASSWORD.
-#detalles faltantes: UUID dinamicos, que el esp32 guarde la contraseña wifi.
 import asyncio
 import aioble
 import bluetooth
@@ -9,6 +6,8 @@ import machine
 import time
 import math
 import ssl
+import json
+import ntptime
 from umqtt.simple import MQTTClient
 from neopixel import NeoPixel
 
@@ -32,6 +31,9 @@ CLIENT_ID = b'TK-2025-MA00-0001'
 MQTT_USER = 'Mariano_Sanchez'
 MQTT_PASSWORD = '0001'
 CA_CERT_FILE = 'emqxsl-ca.crt'
+
+# Archivo para guardar credenciales
+CREDENTIALS_FILE = 'wifi_creds.json'
 
 # Variables globales
 wifi_ssid = None
@@ -112,6 +114,27 @@ class MAX31865:
         self.spi.write(buf)
         self.cs.value(1)
 
+# Funciones para manejar credenciales
+def save_credentials(ssid, password):
+    try:
+        with open(CREDENTIALS_FILE, 'w') as f:
+            json.dump({'ssid': ssid, 'password': password}, f)
+        print("Credenciales guardadas correctamente")
+        return True
+    except Exception as e:
+        print("Error guardando credenciales:", e)
+        return False
+
+def load_credentials():
+    try:
+        with open(CREDENTIALS_FILE, 'r') as f:
+            creds = json.load(f)
+        print("Credenciales cargadas correctamente")
+        return creds['ssid'], creds['password']
+    except Exception as e:
+        print("No se pudieron cargar las credenciales:", e)
+        return None, None
+
 async def send_status(connection, message):
     try:
         if connection and connection.is_connected():
@@ -120,11 +143,50 @@ async def send_status(connection, message):
             print("Estado enviado:", message)
     except Exception as e:
         print("Error enviando estado:", e)
+        
+def sync_time():
+    max_retries = 3
+    ntp_servers = ["pool.ntp.org", "time.nist.gov", "time.google.com"]
+    
+    for attempt in range(max_retries):
+        try:
+            print(f"Intento {attempt + 1} de sincronización NTP con {ntp_servers[attempt % len(ntp_servers)]}")
+            ntptime.host = ntp_servers[attempt % len(ntp_servers)]
+            ntptime.settime()
+            
+            # Verificar que la hora sea razonable (año >= 2023)
+            current_time = time.localtime()
+            if current_time[0] >= 2023:
+                print("Hora sincronizada correctamente:", current_time)
+                return True
+            else:
+                print("Hora sincronizada pero parece incorrecta:", current_time)
+                
+        except Exception as e:
+            print(f"Error sincronizando con {ntp_servers[attempt % len(ntp_servers)]}:", e)
+        
+        time.sleep(2)
+    
+    # Si falla la sincronización NTP, establecer hora aproximada manualmente
+    print("Estableciendo hora manualmente como fallback")
+    manual_time = (2024, 6, 1, 12, 0, 0, 0, 0)
+    time.localtime(manual_time)
+    print("Hora establecida manualmente:", time.localtime())
+    return False
 
 def connect_wifi():
+    global wifi_ssid, wifi_password
     sta = network.WLAN(network.STA_IF)
     sta.active(True)
     time.sleep(1)
+    
+    # Intentar cargar credenciales si no están en memoria
+    if not wifi_ssid or not wifi_password:
+        wifi_ssid, wifi_password = load_credentials()
+    
+    if not wifi_ssid or not wifi_password:
+        raise OSError("No hay credenciales WiFi disponibles")
+        
     if not sta.isconnected():
         print("Conectando a WiFi...")
         sta.connect(wifi_ssid, wifi_password)
@@ -134,6 +196,12 @@ def connect_wifi():
                 raise OSError("Timeout de conexión WiFi")
             time.sleep(0.5)
     print('Conexión WiFi exitosa:', sta.ifconfig())
+    
+    # Sincronizar hora después de conectar WiFi
+    time_synced = sync_time()
+    
+    if not time_synced:
+        print("Advertencia: La hora podría no ser precisa, lo que puede afectar las conexiones SSL")
 
 def sub_callback(topic, msg):
     try:
@@ -255,6 +323,12 @@ async def handle_ble_communication(connection):
             await wifi_characteristic.written()
             wifi_password = wifi_characteristic.read().decode().strip()
 
+            # Guardar las nuevas credenciales
+            if save_credentials(wifi_ssid, wifi_password):
+                await send_status(connection, "Credenciales guardadas")
+            else:
+                await send_status(connection, "Error:No se pudieron guardar credenciales")
+
             wlan.active(True)
             wlan.connect(wifi_ssid, wifi_password)
             
@@ -329,9 +403,12 @@ async def ble_server():
             await asyncio.sleep_ms(1000)
 
 async def main():
-    global ble_active
+    global wifi_ssid, wifi_password, ble_active
     np[0] = (0, 0, 0)
     np.write()
+    
+    # Cargar credenciales al iniciar
+    wifi_ssid, wifi_password = load_credentials()
     
     # Iniciar servidor BLE
     asyncio.create_task(ble_server())
@@ -339,7 +416,7 @@ async def main():
     # Esperar un momento antes de intentar conectar MQTT
     await asyncio.sleep(2)
     
-    # Intentar conectar MQTT si ya tenemos credenciales
+    # Intentar conectar a WiFi y MQTT si hay credenciales
     if wifi_ssid and wifi_password:
         try:
             connect_wifi()

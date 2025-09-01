@@ -15,12 +15,13 @@ import {
   Alert,
   Image,
   NativeModules,
-  NativeEventEmitter
+  NativeEventEmitter,
 } from 'react-native';
 import LottieView from 'lottie-react-native';
 import { BleManager, Device } from 'react-native-ble-plx';
 import { Buffer } from 'buffer';
 import { normalize, normalizeVertical, SCREEN } from './src/utils/normalize';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Definición de interfaz para MQTT Manager
 interface MqttManagerInterface {
@@ -43,6 +44,9 @@ type ConnectedDevice = {
   clientId?: string;
 };
 
+// Clave para almacenar dispositivos conectados
+const CONNECTED_DEVICES_STORAGE_KEY = 'connected_devices';
+
 const App = () => {
   const [showAnimation, setShowAnimation] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
@@ -55,6 +59,8 @@ const App = () => {
   const [connectedDevice, setConnectedDevice] = useState<Device | null>(null);
   const [connectedDevices, setConnectedDevices] = useState<ConnectedDevice[]>([]);
   const [isConnected, setIsConnected] = useState(false);
+  const [isPressed, setIsPressed] = useState(false);
+  const [isButtonDisabled, setIsButtonDisabled] = useState(false);
 
   const SERVICE_UUID = '19b10000-e8f2-537e-4f6c-d104768a1214';
   const CHARACTERISTIC_UUID = '19b10001-e8f2-537e-4f6c-d104768a1214';
@@ -66,6 +72,43 @@ const App = () => {
   const listPosition = useRef(new Animated.Value(0)).current;
   const isMounted = useRef(true);
   const scanTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Cargar dispositivos guardados al iniciar la app
+  useEffect(() => {
+    const loadConnectedDevices = async () => {
+      try {
+        const savedDevices = await AsyncStorage.getItem(CONNECTED_DEVICES_STORAGE_KEY);
+        if (savedDevices) {
+          const parsedDevices = JSON.parse(savedDevices);
+          setConnectedDevices(parsedDevices);
+          console.log('Dispositivos conectados cargados:', parsedDevices);
+        }
+      } catch (error) {
+        console.error('Error al cargar dispositivos conectados:', error);
+      }
+    };
+
+    loadConnectedDevices();
+  }, []);
+
+  // Guardar dispositivos conectados cuando cambien
+  useEffect(() => {
+    const saveConnectedDevices = async () => {
+      try {
+        await AsyncStorage.setItem(
+          CONNECTED_DEVICES_STORAGE_KEY, 
+          JSON.stringify(connectedDevices)
+        );
+        console.log('Dispositivos conectados guardados:', connectedDevices);
+      } catch (error) {
+        console.error('Error al guardar dispositivos conectados:', error);
+      }
+    };
+
+    if (connectedDevices.length > 0) {
+      saveConnectedDevices();
+    }
+  }, [connectedDevices]);
 
   useEffect(() => {
     return () => {
@@ -155,6 +198,10 @@ const App = () => {
     }
   }, [manager, requestPermissions, checkBluetoothState, connectedDevices]);
 
+  const handlePress = useCallback(() => {
+    setIsPressed(prev => !prev);
+  }, []);
+
   const handleSearchPress = useCallback(() => {
     if (isLoading) {
       manager.stopDeviceScan();
@@ -191,78 +238,76 @@ const App = () => {
       setModalVisible(true);
       setDevices(prev => prev.filter(d => d.id !== device.id));
 
-  connected.monitorCharacteristicForService(
-    RECEIVE_SERVICE_UUID,
-    RECEIVE_CHARACTERISTIC_UUID,
-    (error, characteristic) => {
-      if (error) {
-        console.error('Error en monitorización:', error);
-        setIsConnected(false);
-        setIsConnecting(false);
-        return;
-      }
-      
-      if (characteristic?.value) {
-        const rawValue = Buffer.from(characteristic.value, 'base64').toString('utf-8');
-        
-        if (rawValue.startsWith('IP:')) {
-          const ip = rawValue.split(':')[1];
-          setConnectedDevices(prev => {
-            if (prev.some(d => d.id === device.id)) return prev;
+      connected.monitorCharacteristicForService(
+        RECEIVE_SERVICE_UUID,
+        RECEIVE_CHARACTERISTIC_UUID,
+        (error, characteristic) => {
+          if (error) {
+            console.error('Error en monitorización:', error);
+            setIsConnected(false);
+            setIsConnecting(false);
+            return;
+          }
+          
+          if (characteristic?.value) {
+            const rawValue = Buffer.from(characteristic.value, 'base64').toString('utf-8');
+
+            console.log('Respuesta recibida del dispositivo:', rawValue);
             
-            return [...prev, {
-              id: device.id,
-              name: device.name || 'Dispositivo',
-              ip,
-              port: '',
-              user: '',
-              password: '',
-              clientId: ''
-            }];
-          });
-          setModalVisible(false);
-          setIsConnected(true);
-          setIsConnecting(false);
+            if (rawValue.startsWith('IP:')) {
+              const ip = rawValue.split(':')[1];
+              setConnectedDevices(prev => {
+                if (prev.some(d => d.id === device.id)) return prev;
+                
+                return [...prev, {
+                  id: device.id,
+                  name: device.name || 'Dispositivo',
+                  ip,
+                  port: '',
+                  user: '',
+                  password: '',
+                  clientId: ''
+                }];
+              });
+              setModalVisible(false);
+              setIsConnected(true);
+              setIsConnecting(false);
+            }
+            else if (rawValue.startsWith('PORT:')) {
+              const port = rawValue.split(':')[1];
+              setConnectedDevices(prev =>
+                prev.map(d => d.id === device.id ? {...d, port} : d)
+              );
+            }
+            else if (rawValue.startsWith('USER:')) {
+              const user = rawValue.split(':')[1];
+              setConnectedDevices(prev => 
+                prev.map(d => d.id === device.id ? {...d, user} : d)
+              );
+            }
+            else if (rawValue.startsWith('PASSWORD:')) {
+              const password = rawValue.split(':')[1];
+              setConnectedDevices(prev => 
+                prev.map(d => d.id === device.id ? {...d, password} : d)
+              );
+            }
+            else if (rawValue.startsWith('CLIENT_ID:')) {
+              const clientId = rawValue.split(':')[1];
+              setConnectedDevices(prev => 
+                prev.map(d => d.id === device.id ? {...d, clientId} : d)
+              );
+            }
+            else if (rawValue.startsWith('Error:')) {
+              const errorMessage = rawValue.split(':')[1];
+              Alert.alert('Error', errorMessage);
+              setIsConnected(false);
+              setIsConnecting(false);
+              // El modal permanece abierto para que el usuario pueda corregir las credenciales
+            }
+          }
         }
-        else if (rawValue.startsWith('PORT:')) {
-          const port = rawValue.split(':')[1];
-          console.log('MQTT PORT recibido:', port); // ✅ Consola: Puerto MQTT
-          setConnectedDevices(prev =>
-            prev.map(d => d.id === device.id ? {...d, port} : d)
-          );
-        }
-        else if (rawValue.startsWith('USER:')) {
-          const user = rawValue.split(':')[1];
-          console.log('MQTT USER recibido:', user); // ✅ Consola: Usuario MQTT
-          setConnectedDevices(prev => 
-            prev.map(d => d.id === device.id ? {...d, user} : d)
-          );
-        }
-        else if (rawValue.startsWith('PASSWORD:')) {
-          const password = rawValue.split(':')[1];
-          console.log('MQTT PASSWORD recibido:', password); // ✅ Consola: Contraseña MQTT
-          setConnectedDevices(prev => 
-            prev.map(d => d.id === device.id ? {...d, password} : d)
-          );
-        }
-        else if (rawValue.startsWith('CLIENT_ID:')) {
-          const clientId = rawValue.split(':')[1];
-          console.log('MQTT CLIENT_ID recibido:', clientId); // ✅ Consola: Client ID MQTT
-          setConnectedDevices(prev => 
-            prev.map(d => d.id === device.id ? {...d, clientId} : d)
-          );
-        }
-        else if (rawValue.startsWith('Error:')) {
-          const errorMessage = rawValue.split(':')[1];
-          console.error('Error del dispositivo:', errorMessage); // ✅ Consola: Errores
-          Alert.alert('Error', errorMessage);
-          setIsConnected(false);
-          setIsConnecting(false);
-        }
-      }
-    }
-  );
-  
+      );
+      
     } catch (error) {
       console.error('Error de conexión BLE:', error);
       Alert.alert('Error', 'No se pudo conectar al dispositivo');
@@ -306,19 +351,31 @@ const App = () => {
   }, [connectedDevice, ssid, password]);
 
   // Función para eliminar dispositivo conectado
-  const handleDeleteDevice = useCallback((deviceId: string) => {
+  const handleDeleteDevice = useCallback(async (deviceId: string) => {
     Alert.alert('Eliminar', '¿Desea eliminar este dispositivo?', [
       { text: 'Cancelar', style: 'cancel' },
       { 
         text: 'Eliminar', 
-        onPress: () => {
-          setConnectedDevices(prev => prev.filter(d => d.id !== deviceId));
-          // Aquí deberías agregar la lógica para desconectar el dispositivo BLE
+        onPress: async () => {
+          try {
+            // Desconectar MQTT si está conectado
+            await MqttManager.disconnect();
+            // Eliminar de la lista de dispositivos conectados
+            setConnectedDevices(prev => prev.filter(d => d.id !== deviceId));
+            // También eliminar de AsyncStorage
+            const updatedDevices = connectedDevices.filter(d => d.id !== deviceId);
+            await AsyncStorage.setItem(
+              CONNECTED_DEVICES_STORAGE_KEY, 
+              JSON.stringify(updatedDevices)
+            );
+          } catch (error) {
+            console.error('Error al eliminar dispositivo:', error);
+          }
         },
         style: 'destructive'
       }
     ]);
-  }, []);
+  }, [connectedDevices]);
 
   useEffect(() => {
     const timer = setTimeout(() => setShowAnimation(false), 3000);
@@ -366,6 +423,9 @@ const App = () => {
               key={device.id}
               device={device} 
               onDelete={() => handleDeleteDevice(device.id)}
+              isPressed={isPressed}
+              onPress={handlePress}
+              isButtonDisabled={isButtonDisabled}
             />
           ))}
         </View>
@@ -492,12 +552,24 @@ const App = () => {
 };
 
 // Componente para dispositivos conectados
-const ConnectedDeviceItem = ({ device, onDelete }: { device: ConnectedDevice, onDelete: () => void }) => {
+const ConnectedDeviceItem = ({ 
+  device, 
+  onDelete, 
+  isPressed, 
+  onPress, 
+  isButtonDisabled 
+}: { 
+  device: ConnectedDevice, 
+  onDelete: () => void,
+  isPressed: boolean,
+  onPress: () => void,
+  isButtonDisabled: boolean
+}) => {
   const brokerUrl = 'ssl://qbd56d0e.ala.us-east-1.emqxsl.com:8883';
   
   const [clientId] = useState(`client_${Math.random().toString(16).substr(2, 8)}`);
-  const username = device.user || '';
-  const password = device.password || '';
+  const [username, setUsername] = useState(device.user || '');
+  const [password, setPassword] = useState(device.password || '');
   const controlTopic = 'Control';
   const tempTopic = 'Temp';
   const statusTopic = 'Estado';
@@ -520,51 +592,62 @@ const ConnectedDeviceItem = ({ device, onDelete }: { device: ConnectedDevice, on
   const connectionSubscriptionRef = useRef<any>(null);
   const messageSubscriptionRef = useRef<any>(null);
 
+  // Actualizar credenciales cuando el dispositivo prop cambie
+  useEffect(() => {
+    setUsername(device.user || '');
+    setPassword(device.password || '');
+  }, [device.user, device.password]);
+
   useEffect(() => {
     isMounted.current = true;
     
-    // Crear las suscripciones primero
-    connectionSubscriptionRef.current = mqttEmitter.addListener(
-      'connectionStatus', 
-      (event: { connected: boolean; error?: string }) => {
-        if (!isMounted.current) return;
+    // Solo conectar si tenemos credenciales
+    if (username && password) {
+      // Crear las suscripciones primero
+      connectionSubscriptionRef.current = mqttEmitter.addListener(
+        'connectionStatus', 
+        (event: { connected: boolean; error?: string }) => {
+          if (!isMounted.current) return;
 
-        if (event.connected) {
-          handleSuccessfulConnection();
-        } else {
-          handleDisconnection(event.error || 'Se perdió la conexión');
+          if (event.connected) {
+            handleSuccessfulConnection();
+          } else {
+            handleDisconnection(event.error || 'Se perdió la conexión');
+          }
         }
-      }
-    );
+      );
 
-    messageSubscriptionRef.current = mqttEmitter.addListener(
-      'messageReceived', 
-      (message: { topic: string; message: string }) => {
-        try {
-          const topic = message.topic;
-          const msg = message.message;
+      messageSubscriptionRef.current = mqttEmitter.addListener(
+        'messageReceived', 
+        (message: { topic: string; message: string }) => {
+          try {
+            const topic = message.topic;
+            const msg = message.message;
 
-          if (topic === tempTopic) {
-            const tempValue = parseFloat(msg);
-            if (!isNaN(tempValue)) {
-              setTemperature(tempValue);
+            if (topic === tempTopic) {
+              const tempValue = parseFloat(msg);
+              if (!isNaN(tempValue)) {
+                setTemperature(tempValue);
+                resetCountdown();
+              }
+            }
+
+            if (topic === statusTopic) {
+              setIsSnowActive(msg === '1');
               resetCountdown();
             }
+          } catch (e) {
+            console.error("Error procesando mensaje:", e);
           }
-
-          if (topic === statusTopic) {
-            setIsSnowActive(msg === '1');
-            resetCountdown();
-          }
-        } catch (e) {
-          console.error("Error procesando mensaje:", e);
         }
-      }
-    );
+      );
 
-    // Luego conectar al broker
-    connectToBroker();
-    startCountdown();
+      // Luego conectar al broker
+      connectToBroker();
+      startCountdown();
+    } else {
+      console.log('Esperando credenciales MQTT...');
+    }
 
     return () => {
       isMounted.current = false;
@@ -583,7 +666,7 @@ const ConnectedDeviceItem = ({ device, onDelete }: { device: ConnectedDevice, on
       // Limpiar temporizadores
       stopCountdown();
     };
-  }, [device.id]); // Solo se ejecuta cuando cambia el ID del dispositivo
+  }, [device.id, username, password]);
 
   useEffect(() => {
     if (countdown <= 0) {
@@ -742,25 +825,25 @@ const ConnectedDeviceItem = ({ device, onDelete }: { device: ConnectedDevice, on
         </View>
         <TouchableOpacity
           style={[
-            styles.snowButton,
-            (deviceActive && isSnowActive) 
-              ? styles.snowButtonActive 
-              : styles.snowButtonInactive,
-            (!isConnected || !deviceActive) && styles.buttonDisabled
+            styles.snowButton, 
+            isSnowActive ? styles.snowButtonActive : styles.snowButtonInactive
           ]}
           onPress={handleSnowPress}
-          disabled={!isConnected || !deviceActive}
+          disabled={isButtonDisabled || !isConnected || !deviceActive}
         >
           <Image
             source={require('./assets/copo2.png')}
-            style={styles.snowButtonImage}
+            style={[
+              styles.snowButtonImage,
+              isSnowActive ? styles.snowButtonImageActive : styles.snowButtonImageInactive
+            ]}
           />
         </TouchableOpacity>
       </View>
 
       <TouchableOpacity 
         style={styles.menuButton}
-        onPress={() => setIsMenuOpen(!isMenuOpen)}
+        onPress={() => setIsMenuOpen(!isMenuOpen)} 
       >
         <Text style={styles.menuButtonText}>...</Text>
       </TouchableOpacity>
@@ -780,7 +863,7 @@ const ConnectedDeviceItem = ({ device, onDelete }: { device: ConnectedDevice, on
               { 
                 backgroundColor: deviceActive ? '#2ecc71' : '#e74c3c' 
               }
-            ]} />
+            ]} /> 
             
             <TouchableOpacity 
               style={styles.iconButton} 
@@ -904,16 +987,15 @@ const styles = StyleSheet.create({
     width: normalize(50),
     height: normalize(50),
   },
-  snowButtonActive: {
-    backgroundColor: '#3498db',
+  snowButtonPressed: {
+    backgroundColor: '#007AFF',
   },
-  snowButtonInactive: {
-    backgroundColor: '#bdc3c7',
+  snowButtonReleased: {
+    backgroundColor: '#e0e0e0',
   },
   snowButtonImage: {
     width: normalize(24),
     height: normalize(24),
-    tintColor: '#ffffff',
     resizeMode: 'contain',
   },
   buttonDisabled: {
@@ -1081,8 +1163,7 @@ const styles = StyleSheet.create({
     fontSize: normalize(16),
     color: '#fff',
   },
-
-    connectingOverlay: {
+  connectingOverlay: {
     position: 'absolute',
     top: 0,
     left: 0,
@@ -1099,16 +1180,29 @@ const styles = StyleSheet.create({
     color: '#3498db',
     fontWeight: 'bold',
   },
+  snowButtonActive: {
+    backgroundColor: '#3498db', // Azul cuando está activo
+  },
+  snowButtonInactive: {
+    backgroundColor: '#95a5a6', // Gris cuando está inactivo
+  },
+  snowButtonImageActive: {
+    tintColor: '#ffffff', // Blanco cuando está activo
+  },
+  snowButtonImageInactive: {
+    tintColor: '#ecf0f1', // Gris claro cuando está inactivo
+  },
+
   deviceConnectingIndicator: {
     position: 'absolute',
     top: 5,
     right: 5,
     zIndex: 10,
   },
-  
-  
-});
 
+}
+);
 
 
 export default App;
+ 
