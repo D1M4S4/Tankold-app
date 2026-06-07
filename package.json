@@ -10,14 +10,35 @@
     "test": "jest"
   },
   "dependencies": {
+<<<<<<< HEAD
+    "@react-native-async-storage/async-storage": "^2.2.0",
+    "@react-native/new-app-screen": "0.80.2",
+    "lottie-ios": "^4.5.1",
+    "lottie-react-native": "^7.2.5",
+    "react": "19.1.0",
+    "react-native": "0.80.2",
+    "react-native-ble-plx": "^3.5.0",
+    "react-native-paho-mqtt": "^0.1.1",
+    "react-native-permissions": "^5.4.2"
+=======
     "react": "19.1.0",
     "react-native": "0.80.1",
     "@react-native/new-app-screen": "0.80.1"
+>>>>>>> 6fe383932a51d4dd736598b6d65f339aa0e43f47
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
     "@babel/preset-env": "^7.25.3",
     "@babel/runtime": "^7.25.0",
+<<<<<<< HEAD
+    "@react-native-community/cli": "19.1.1",
+    "@react-native-community/cli-platform-android": "19.1.1",
+    "@react-native-community/cli-platform-ios": "19.1.1",
+    "@react-native/babel-preset": "0.80.2",
+    "@react-native/eslint-config": "0.80.2",
+    "@react-native/metro-config": "0.80.2",
+    "@react-native/typescript-config": "0.80.2",
+=======
     "@react-native-community/cli": "19.0.0",
     "@react-native-community/cli-platform-android": "19.0.0",
     "@react-native-community/cli-platform-ios": "19.0.0",
@@ -25,6 +46,7 @@
     "@react-native/eslint-config": "0.80.1",
     "@react-native/metro-config": "0.80.1",
     "@react-native/typescript-config": "0.80.1",
+>>>>>>> 6fe383932a51d4dd736598b6d65f339aa0e43f47
     "@types/jest": "^29.5.13",
     "@types/react": "^19.1.0",
     "@types/react-test-renderer": "^19.1.0",
@@ -37,4 +59,8 @@
   "engines": {
     "node": ">=18"
   }
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> 6fe383932a51d4dd736598b6d65f339aa0e43f47

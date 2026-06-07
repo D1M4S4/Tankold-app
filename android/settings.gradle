@@ -1,6 +1,33 @@
+<<<<<<< HEAD
+pluginManagement {
+    includeBuild("../node_modules/@react-native/gradle-plugin")
+}
+
+plugins {
+    id("com.facebook.react.settings")
+}
+
+extensions.configure(com.facebook.react.ReactSettingsExtension){ ex ->
+    ex.autolinkLibrariesFromCommand()
+}
+
+rootProject.name = 'com.tankoldble'
+include ':app'
+includeBuild('../node_modules/@react-native/gradle-plugin')
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+    repositories {
+        google()
+        mavenCentral()
+        maven { url("$rootDir/../node_modules/react-native/android") }
+    }
+}
+=======
 pluginManagement { includeBuild("../node_modules/@react-native/gradle-plugin") }
 plugins { id("com.facebook.react.settings") }
 extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
 rootProject.name = 'Tankold'
 include ':app'
 includeBuild('../node_modules/@react-native/gradle-plugin')
+>>>>>>> 6fe383932a51d4dd736598b6d65f339aa0e43f47
