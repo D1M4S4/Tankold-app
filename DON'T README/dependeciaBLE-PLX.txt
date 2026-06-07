@@ -1,0 +1,38 @@
+dependecia BLE-PLX 
+-npx @react-native-community/cli init TankoldBLE --package-name "com.tankoldble"
+-npm install react-native-ble-plx
+
+2. Configuración para Android (archivos modificados)
+android/app/build.gradle - Añade esto en dependencies:
+
+gradle
+implementation project(':react-native-ble-plx')
+android/settings.gradle - Asegúrate que incluye:
+
+gradle
+include ':react-native-ble-plx'
+project(':react-native-ble-plx').projectDir = new File(rootProject.projectDir, '../node_modules/react-native-ble-plx/android')
+3. Configurar CMake (nuevo requerimiento)
+Crea/edita android/app/CMakeLists.txt:
+
+cmake
+cmake_minimum_required(VERSION 3.13)
+include(${REACT_ANDROID_DIR}/cmake-utils/ReactNative-application.cmake)
+
+# Configuración específica para BLE PLX
+find_library(log-lib log)
+4. Permisos en AndroidManifest.xml
+Actualiza android/app/src/main/AndroidManifest.xml:
+
+xml
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <uses-permission android:name="android.permission.INTERNET" />
+  <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
+  <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+  <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
+  <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+  <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+  
+  <!-- Resto de tu configuración -->
+</manifest>
+

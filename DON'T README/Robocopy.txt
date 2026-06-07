@@ -1,0 +1,3 @@
+-como hacer un backup con cmd
+1. abrir cmd como administrador 
+2. ejecutar: C:\Users\casta\OneDrive\Escritorio\APP>Robocopy "app-v0.5.8.9.1" app-v0.5.8.9.2 /E /W:1 /R:1 /MIR /COPYALL /LOG:backup.txt
