@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
@@ -900,10 +901,33 @@ const ConnectedDeviceItem = ({
     </View>
   );
 };
+=======
+/**
+ * Sample React Native App
+ * https://github.com/facebook/react-native
+ *
+ * @format
+ */
+
+import { NewAppScreen } from '@react-native/new-app-screen';
+import { StatusBar, StyleSheet, useColorScheme, View } from 'react-native';
+
+function App() {
+  const isDarkMode = useColorScheme() === 'dark';
+
+  return (
+    <View style={styles.container}>
+      <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
+      <NewAppScreen templateFileName="App.tsx" />
+    </View>
+  );
+}
+>>>>>>> 6fe383932a51d4dd736598b6d65f339aa0e43f47
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+<<<<<<< HEAD
     backgroundColor: '#fff',
   },
   animationContainer: {
@@ -1206,3 +1230,9 @@ const styles = StyleSheet.create({
 
 export default App;
  
+=======
+  },
+});
+
+export default App;
+>>>>>>> 6fe383932a51d4dd736598b6d65f339aa0e43f47
